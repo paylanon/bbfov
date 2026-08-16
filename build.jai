@@ -1,9 +1,12 @@
 #run {
     
+    make_directory_if_it_does_not_exist("bin");
+    
     // dll
     w := compiler_create_workspace();
     options := get_build_options();
     using options;
+    output_path = "bin";
     output_executable_name = "bbfov";
     output_type = .DYNAMIC_LIBRARY;
     set_optimization(*options, .VERY_OPTIMIZED);
@@ -14,6 +17,7 @@
     // injector exe
     w = compiler_create_workspace();
     options = get_build_options();
+    output_path = "bin";
     output_executable_name = "bbfov_injector";
     set_optimization(*options, .VERY_OPTIMIZED);
     additional_linker_arguments = .["/SUBSYSTEM:windows", "/ENTRY:mainCRTStartup"];
@@ -29,7 +33,7 @@
     compiler_end_intercept(w);
     
     icon := read_entire_file("data/insight.ico");
-    set_icon_by_data("bbfov_injector.exe", icon);
+    set_icon_by_data("bin/bbfov_injector.exe", icon);
     
     set_build_options_dc(.{do_output = false});
 }

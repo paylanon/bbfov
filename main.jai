@@ -1,27 +1,26 @@
 SHADPS4_BASE :: 0x800000000;
 CODE_SCAN_SIZE :: 256 * 1024 * 1024;
-
-FOV_HOOK_SIGNATURE :: u8.[
-
-    // vmovss [r13+50], xmm1
-    // ----------------------------------
-    0xC4, 0xC1, 0x7A, 0x11, 0x4D, 0x50, 
-
-    // vmovss xmm2, [r13+184]
-    // ----------------------------------
-    0xC4, 0xC1, 0x7A, 0x10, 0x95,
-    0x84, 0x01, 0x00, 0x00
-];
-
 DEFAULT_FOV :: 0.005;
 
-fov_hook_addr: *void;
-original_fov_hook: [15] u8;
+hook_asm :: #library,no_dll "hook";
 
-fov_cave_code: [160] u8;
-fov_cave_size: s64;
-fov_cave: *void;
+FOV_HOOK_SIGNATURE:     u8 #elsewhere hook_asm;
+FOV_HOOK_SIGNATURE_END: u8 #elsewhere hook_asm;
+
+FOV_CAVE:     u8 #elsewhere hook_asm;
+FOV_CAVE_END: u8 #elsewhere hook_asm;
+FOV_DEST:     u8 #elsewhere hook_asm;
+
+_patch_returnaddr: u8 #elsewhere hook_asm;
+
+fov_hook_sig: [] u8;
+fov_hook_addr: *void;
+
+original_fov_hook: [16] u8;
+
+fov_cave: [] u8;
 fov_offset: s64;
+fov_dest: *float;
 
 current_fov: float;
 
@@ -32,7 +31,7 @@ entry_thread: HANDLE;
 #program_export DllMain :: (dll_instance: HINSTANCE, reason: u32) -> BOOL #c_call {
     push_context {
         
-        if reason == DLL_PROCESS_ATTACH {            
+        if reason == DLL_PROCESS_ATTACH {
 
             success:, output_channel = writer_connect("bbfov_ir");
             assert(success);
@@ -54,7 +53,10 @@ entry_thread: HANDLE;
 entry_proc :: (p: *void) #c_call {
     push_context {
         
-        fov_hook_addr = scan_pattern(xx SHADPS4_BASE, CODE_SCAN_SIZE, FOV_HOOK_SIGNATURE.data, FOV_HOOK_SIGNATURE.count);
+        fov_hook_sig.data = *FOV_HOOK_SIGNATURE;
+        fov_hook_sig.count = *FOV_HOOK_SIGNATURE_END - *FOV_HOOK_SIGNATURE;
+        
+        fov_hook_addr = scan_pattern(xx SHADPS4_BASE, CODE_SCAN_SIZE, fov_hook_sig.data, fov_hook_sig.count);
         assert(xx fov_hook_addr);
         
         install_fov_hook();
@@ -96,9 +98,8 @@ reader_loop :: (p: *void) #c_call {
 
 set_fov :: (desired: float) {
     
-    dest := (fov_cave + fov_offset).(*float);
-    dest.* = desired;
-    current_fov = dest.*;
+    fov_dest.* = desired;
+    current_fov = fov_dest.*;
 }
 
 scan_pattern :: (start: *void, size: s64, pattern: *u8, pattern_length: s64) -> *void {
@@ -119,7 +120,7 @@ scan_pattern :: (start: *void, size: s64, pattern: *u8, pattern_length: s64) -> 
         scan_end := ifx region_end < end then region_end else end;
 
         if mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_NOACCESS) && !(mbi.Protect & PAGE_GUARD) {
-
+            
             base := scan_start;
             scan_length := scan_end - scan_start;
 
@@ -138,102 +139,49 @@ scan_pattern :: (start: *void, size: s64, pattern: *u8, pattern_length: s64) -> 
 
 install_fov_hook :: () {
 
-    return_addr := fov_hook_addr + FOV_HOOK_SIGNATURE.count;
+    return_addr := fov_hook_addr + fov_hook_sig.count;
 
-    if !fov_cave_size {
-        memcpy(original_fov_hook.data, fov_hook_addr, FOV_HOOK_SIGNATURE.count);
-        build_fov_cave(return_addr);
+    if !fov_cave.count { // first install
+        memcpy(original_fov_hook.data, fov_hook_addr, fov_hook_sig.count);
+        patch_fov_cave(return_addr);
         current_fov = DEFAULT_FOV;
     }
 
-    fov_cave = VirtualAlloc(null, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    assert(xx fov_cave);
+    fov_cave.data = VirtualAlloc(null, xx fov_cave.count, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    assert(xx fov_cave.data);
 
-    memcpy(fov_cave, fov_cave_code.data, fov_cave_size);
-    FlushInstructionCache(GetCurrentProcess(), fov_cave, fov_cave_size);
+    memcpy(fov_cave.data, *FOV_CAVE, fov_cave.count);
+    FlushInstructionCache(GetCurrentProcess(), fov_cave.data, fov_cave.count);
     
     // write absolute jump
     buffer: [32] u8;
     buffer[0] = 0xFF;
     buffer[1] = 0x25;
-    memcpy(*buffer[6], *fov_cave, 8);
-    for 14..FOV_HOOK_SIGNATURE.count buffer[it] = 0x90;
-    patch_bytes(fov_hook_addr, buffer.data, FOV_HOOK_SIGNATURE.count);
+    memcpy(*buffer[6], *fov_cave.data, 8);
+    for 14..fov_hook_sig.count-1 buffer[it] = 0x90;
+    
+    patch_bytes(fov_hook_addr, buffer.data, fov_hook_sig.count);
+    
+    fov_dest = (fov_cave.data + fov_offset).(*float);
 }
 
 uninstall_fov_hook :: () {
 
-    patch_bytes(fov_hook_addr, original_fov_hook.data, FOV_HOOK_SIGNATURE.count);
-    VirtualFree(fov_cave, 0, MEM_RELEASE);
-    fov_cave = null;
+    patch_bytes(fov_hook_addr, original_fov_hook.data, fov_hook_sig.count);
+    VirtualFree(fov_cave.data, 0, MEM_RELEASE);
+    fov_cave.data = null;
+    fov_dest = null;
 }
 
-// https://www.nexusmods.com/bloodborne/mods/193
-
-build_fov_cave :: (return_addr: *void) {
+patch_fov_cave :: (return_addr: *void) {
     
-    p := fov_cave_code.data;
-
-    // addss xmm1, dword ptr [rip + fov]
-    // ----------------------------------
-    write_and_advance(*p, 0xF3); 
-    write_and_advance(*p, 0x0F);
-    write_and_advance(*p, 0x58);
-    write_and_advance(*p, 0x0D);
-
-    fov_disp := p.(*u8);
-    p += 4;
-
-    // vmovss dword ptr [r13+0x50], xmm1
-    // ----------------------------------
-    write_and_advance(*p, 0xC4);
-    write_and_advance(*p, 0xC1);
-    write_and_advance(*p, 0x7A);
-    write_and_advance(*p, 0x11);
-    write_and_advance(*p, 0x4D);
-    write_and_advance(*p, 0x50);
+    memcpy(*_patch_returnaddr, *return_addr, 8);
     
-    // vmovss xmm2, dword ptr [r13+0x184]
-    // ----------------------------------
-    write_and_advance(*p, 0xC4);
-    write_and_advance(*p, 0xC1);
-    write_and_advance(*p, 0x7A);
-    write_and_advance(*p, 0x10);
-    write_and_advance(*p, 0x95);
-    write_and_advance(*p, 0x84);
-    write_and_advance(*p, 0x01);
-    write_and_advance(*p, 0x00);
-    write_and_advance(*p, 0x00);
-    
-    // dq returnAddr
-    // ----------------------------------
-    write_and_advance(*p, 0xFF);
-    write_and_advance(*p, 0x25);
-    write_and_advance(*p, 0x00);
-    write_and_advance(*p, 0x00);
-    write_and_advance(*p, 0x00);
-    write_and_advance(*p, 0x00);
-
-    memcpy(p, *return_addr, size_of(*void));
-    p += size_of(*void);
-
-    fov_offset = (p - fov_cave_code.data).(s64);
-
     initial_fov := DEFAULT_FOV;
-    memcpy(p, *initial_fov, 4);
-    p += 4;
-
-    end_offset := 8;
-    disp := (fov_offset - end_offset).(s32);
-    memcpy(fov_disp, *disp, 4);
+    memcpy(*FOV_DEST, *initial_fov, 4);
     
-    fov_cave_size = p - fov_cave_code.data;
-}
-
-write_and_advance :: (dest: **$T, value: T) {
-
-    dest.*.* = value;
-    dest.* += 1;
+    fov_offset = *FOV_DEST - *FOV_CAVE;
+    fov_cave.count = *FOV_CAVE_END - *FOV_CAVE;
 }
 
 patch_bytes :: (addr: *void, bytes: *u8, length: s64) {

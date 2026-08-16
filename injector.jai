@@ -5,12 +5,12 @@ window: Window_Type;
 window_width := 380;
 window_height := 240;
 
+injector_thread: Thread;
+
 ui_font: *Simp.Dynamic_Font;
 ui_theme: Overall_Theme;
 
 current_time: float64;
-
-injector_thread: Thread;
 
 
 ready   := false;
@@ -63,6 +63,11 @@ main :: () {
         }
 
         draw_one_frame();
+    }
+
+    if ready {
+        write_message({.EXIT, 0});
+        writer_disconnect(*output_channel);
     }
 }
 
@@ -199,11 +204,11 @@ theme_init :: () {
     {
         using ui_theme.slider_theme;
         foreground.rectangle_shape.roundedness = .04;
-        foreground.text_color            = {.6, .58, .54, 1};
-        foreground.surface_color         = {.16, .14, .14, .8};
-        foreground.surface_color_over    = {.16, .14, .14, .9};
-        foreground.surface_color_flash   = {.16, .14, .14, .8};
-        foreground.surface_color_down    = {.5, .48, .44, 1};
+        foreground.text_color          = {.6, .58, .54, 1};
+        foreground.surface_color       = {.16, .14, .14, .8};
+        foreground.surface_color_over  = {.16, .14, .14, .9};
+        foreground.surface_color_flash = {.16, .14, .14, .8};
+        foreground.surface_color_down  = {.5, .48, .44, 1};
         foreground.font = ui_font;
         background.rectangle_shape.roundedness = .04;
         decimals = 3;
@@ -312,7 +317,6 @@ draw_one_frame :: () {
                 write_entire_file("saved.fov", *user_fov, 4);
                 
                 write_message({.EXIT, 0});
-
                 writer_disconnect(*output_channel);
                 
                 exit(0);
