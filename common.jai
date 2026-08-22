@@ -1,9 +1,10 @@
-BBFOV_VERSION :: 1.1;
+BBFOV_VERSION :: 1.2;
 
 CHANNEL_DATA_BYTES :: 65536;
 
 Message_Type :: enum {
     FOV_VAL;
+    ERROR;
     ENABLE;
     DISABLE;
     EXIT;
@@ -12,7 +13,7 @@ Message_Type :: enum {
 Channel_Message :: struct {
     
     type: Message_Type;
-    fov_value: float;
+    value: float;
 }
 
 input_channel:  Read_Channel;

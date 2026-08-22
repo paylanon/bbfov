@@ -1,6 +1,8 @@
-SHADPS4_BASE :: 0x800000000;
+SHADPS4_BASE_LOW :: 0x400000;  // shadPS4 v0.18+
+SHADPS4_BASE     :: 0x800000000;
 CODE_SCAN_SIZE :: 256 * 1024 * 1024;
-DEFAULT_FOV :: 0.005;
+
+DEFAULT_FOV :: 0.004;
 
 hook_asm :: #library,no_dll "hook";
 
@@ -56,8 +58,15 @@ entry_proc :: (p: *void) #c_call {
         fov_hook_sig.data = *FOV_HOOK_SIGNATURE;
         fov_hook_sig.count = *FOV_HOOK_SIGNATURE_END - *FOV_HOOK_SIGNATURE;
         
-        fov_hook_addr = scan_pattern(xx SHADPS4_BASE, CODE_SCAN_SIZE, fov_hook_sig.data, fov_hook_sig.count);
-        assert(xx fov_hook_addr);
+        fov_hook_addr = scan_pattern(xx SHADPS4_BASE_LOW, CODE_SCAN_SIZE, fov_hook_sig.data, fov_hook_sig.count);
+        
+        if !fov_hook_addr fov_hook_addr = scan_pattern(xx SHADPS4_BASE, CODE_SCAN_SIZE, fov_hook_sig.data, fov_hook_sig.count);
+            
+        if !fov_hook_addr {
+            write_message({.ERROR, 0});
+            writer_disconnect(*output_channel);
+            return;
+        }
         
         install_fov_hook();
         
@@ -82,7 +91,7 @@ reader_loop :: (p: *void) #c_call {
 
                 if channel_msg.type == {
                 
-                    case .FOV_VAL;  set_fov(channel_msg.fov_value);
+                    case .FOV_VAL;  set_fov(channel_msg.value);
                     case .ENABLE;   install_fov_hook(); set_fov(current_fov);
                     case .DISABLE;  uninstall_fov_hook();
                     case .EXIT;     quit = true;

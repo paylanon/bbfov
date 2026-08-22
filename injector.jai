@@ -130,15 +130,26 @@ injector_main :: (thread: *Thread) -> s64 {
     conout(1, .DOC1, "Injecting DLL...");
     inject_dll(pid, get_absolute_path("bbfov.dll"));
     
+    failure: bool;
     while true {
+        
+        if failure continue;
         
         message_success, fatal_error, message := reader_poll_for_message(*input_channel);
         if message_success {
             
             channel_msg := message.user_read_pointer.(*Channel_Message);
-            user_fov = channel_msg.fov_value;
-            reader_done_with_message(*message);
-            break;
+
+            if channel_msg.type == {
+                case .ERROR;
+                  conout(0, .ERROR, "Pattern scan failed!");
+                  conout(1, .ERROR, "Incompatible version of shadPS4...");
+                  failure = true;
+                case .FOV_VAL;
+                  user_fov = channel_msg.value;
+                  reader_done_with_message(*message);
+                  break;
+            }
         }
     }
     
